@@ -1,0 +1,15 @@
+[package]
+name = "cfw-log-generator"
+version = "0.1.0"
+authors = ["Mike Zeller <mike@mikezeller.net>"]
+edition = "2018"
+
+[dependencies]
+chrono = "0.4"
+rand = "0.6"
+serde_json = "1.0"
+flate2 = "1.0.6"
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]

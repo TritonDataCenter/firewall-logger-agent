@@ -1,0 +1,10 @@
+[workspace]
+
+members = [
+	"logen",
+	"cfwlogd",
+]
+
+# Temporary patch until the udpated rand crate with illumos support lands
+[patch.crates-io]
+rand = { git = "https://github.com/jasonbking/rand", branch = "illumos" }
