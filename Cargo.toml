@@ -1,0 +1,15 @@
+[workspace]
+
+members = [
+	"cfwlogd",
+	"testutils",
+	"vminfod-client",
+]
+
+[profile.dev]
+panic = 'abort'
+
+[profile.release]
+panic = 'abort'
+lto = true
+debug = true

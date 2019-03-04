@@ -1,0 +1,56 @@
+#!/bin/bash
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+#
+
+#
+# Copyright 2019 Joyent, Inc.
+#
+
+#
+# Runs on node (CN + HN) boot to setup log rotation for firewall-logger agent logs.
+#
+
+set -o xtrace
+
+. /lib/svc/share/smf_include.sh
+. /lib/sdc/config.sh
+
+
+function setup_logadm {
+    # firewall-logger-agent logadm configuration
+    #
+    # Firewall logs can grow pretty large.  So long as hermes is archiving and
+    # deleting logs, this should never need to delete the rotated logs.  In the
+    # event that hermes isn't doing its job logadm cleans up when there are more
+    # than 100g of logs or there are just too many.
+    /usr/sbin/logadm -v -w firewall_logger_logs -C 168 -S 100g -z 0 -p 1h \
+        -a 'pkill -HUP -z global cfwlogd; true' -t '$dirname/%FT%T.log' \
+	'/var/log/firewall/*/*/current.log'
+
+    # Move the smf_logs entry to run last (after the entries we just added) so
+    # that the default '-C' (from
+    # https://github.com/joyent/smartos-live/blob/master/overlay/generic/etc/logadm.conf)
+    # doesn't defeat our attempts to rotate out of "/var/svc/log".
+    /usr/sbin/logadm -v -r smf_logs
+    /usr/sbin/logadm -v -w smf_logs -C 8 -c -s 1m '/var/svc/log/*.log'
+}
+
+case "$1" in
+'start')
+    setup_logadm
+    ;;
+
+'stop')
+    echo "'stop' not yet supported" >&2
+    exit $SMF_EXIT_ERR_FATAL
+    ;;
+
+*)
+    echo "Usage: $0 { start | stop }"
+    exit $SMF_EXIT_ERR_FATAL
+    ;;
+esac
+exit $SMF_EXIT_OK
