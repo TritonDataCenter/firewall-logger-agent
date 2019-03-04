@@ -1,0 +1,19 @@
+[workspace]
+
+members = [
+	"cfwlogd",
+	"testutils",
+	"vminfod",
+]
+
+# Temporary patch until the udpated rand crate is pushed to crates.io
+#[patch.crates-io]
+#rand = { git = "https://github.com/rust-random/rand", branch = "master" }
+
+[profile.dev]
+panic = 'abort'
+
+[profile.release]
+panic = 'abort'
+lto = true
+debug = true

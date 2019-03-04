@@ -1,0 +1,23 @@
+[package]
+name = "cfwlogd"
+version = "0.1.0"
+authors = ["Mike Zeller <mike@mikezeller.net>"]
+edition = "2018"
+
+[dependencies]
+crossbeam = "0.7"
+vminfod = { path = "../vminfod" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+nom = "4.2"
+uuid = { version = "0.7", features = ["serde", "v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+pretty_env_logger = "0.3"
+log = "0.4"
+failure = "0.1"
+bytes = "0.4"
+signal-hook = "0.1"
+libc = "0.2"
+
+[dev-dependencies]
+testutils = { path = "../testutils" }
