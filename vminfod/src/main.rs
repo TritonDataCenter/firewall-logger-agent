@@ -5,6 +5,35 @@ use std::string::FromUtf8Error;
 use futures::{Future, Stream};
 use hyper::{rt, Client};
 use linefeed::Lines;
+use serde::Deserialize;
+
+#[derive(Deserialize, Debug)]
+enum EventType {
+    #[serde(rename = "ready")]
+    Ready,
+    #[serde(rename = "create")]
+    Create,
+    #[serde(rename = "modify")]
+    Modify,
+    #[serde(rename = "delete")]
+    Delete,
+}
+
+#[derive(Deserialize, Debug)]
+struct Zone {
+    uuid: String,
+    alias: String,
+    owner_uuid: String,
+    zonedid: i32,
+}
+
+#[derive(Deserialize, Debug)]
+struct VminfodEvent {
+    #[serde(rename = "type")]
+    event_type: EventType,
+    vms: Option<serde_json::Value>,
+    vm: Option<Zone>,
+}
 
 enum Error {
     Hyper(hyper::Error),
@@ -31,9 +60,8 @@ fn main() {
         .and_then(|res| {
             Lines::new(res.into_body().map_err(Error::Hyper))
                 .for_each(|line| {
-                    println!("");
-                    println!("{}", line);
-                    println!("");
+                    let event: VminfodEvent = serde_json::from_str(&line).unwrap();
+                    println!("event: {:#?}", event);
                     Ok(())
                 })
                 .map_err(|_| println!("ignoring for_each error for now"))
