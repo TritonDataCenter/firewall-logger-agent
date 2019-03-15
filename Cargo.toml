@@ -3,8 +3,9 @@
 members = [
 	"logen",
 	"cfwlogd",
+	"vminfod",
 ]
 
-# Temporary patch until the udpated rand crate with illumos support lands
+# Temporary patch until the udpated rand crate is pushed to crates.io
 [patch.crates-io]
 rand = { git = "https://github.com/jasonbking/rand", branch = "illumos" }
