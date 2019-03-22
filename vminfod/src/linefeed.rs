@@ -119,6 +119,7 @@ mod linefeed_tests {
             Async::Ready(Some("escaped\\n".to_string()))
         );
         assert_eq!(lines.poll().unwrap(), Async::Ready(Some("".to_string())));
+        assert_eq!(lines.poll().unwrap(), Async::Ready(None));
     }
 
 }
