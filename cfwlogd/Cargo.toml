@@ -5,3 +5,13 @@ authors = ["Mike Zeller <mike@mikezeller.net>"]
 edition = "2018"
 
 [dependencies]
+crossbeam = "0.7.1"
+vminfod = { path = "../vminfod" }
+serde = { version = "1.0.89", features = ["derive"] }
+serde_json = "1.0.39"
+nom = "4.2.3"
+uuid = { version = "0.7.3", features = ["serde", "v4"] }
+chrono = "0.4.6"
+log = "0.4.6"
+failure = "0.1.5"
+pretty_env_logger = "0.3.0"

@@ -9,3 +9,10 @@ members = [
 # Temporary patch until the udpated rand crate is pushed to crates.io
 [patch.crates-io]
 rand = { git = "https://github.com/jasonbking/rand", branch = "illumos" }
+
+[profile.dev]
+panic = 'abort'
+
+[profile.release]
+panic = 'abort'
+lto = true
