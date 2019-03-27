@@ -2,10 +2,10 @@ use std::net::IpAddr;
 
 use chrono::{TimeZone, Utc};
 use nom::{be_u128, be_u16, le_u16, le_u32, le_u64};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub enum CfwEvType {
     Block,
     Begin,
@@ -24,7 +24,7 @@ impl From<u16> for CfwEvType {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub enum Direction {
     In,
     Out,
@@ -41,7 +41,7 @@ impl From<u8> for Direction {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub enum Protocol {
     AH,
     ESP,
@@ -67,7 +67,7 @@ impl From<u8> for Protocol {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub struct EventInfo {
     pub event_type: CfwEvType,
     pub length: u16,
@@ -90,57 +90,62 @@ named!(pub peek_event( &[u8] ) -> EventInfo,
     )
 );
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
 pub enum CfwEvent {
     Traffic(TrafficEvent),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub struct TrafficEvent {
-    pub cfwev_type: CfwEvType,
-    pub cfwev_length: u16,
-    pub cfwev_zonedid: u32,
-    pub cfwev_ruleid: u16,
-    pub cfwev_protocol: Protocol,
-    pub cfwev_direction: Direction,
-    pub cfwev_sport: u16,
-    pub cfwev_dport: u16,
-    pub cfwev_saddr: IpAddr,
-    pub cfwev_daddr: IpAddr,
-    pub cfwev_tstamp: String,
-    pub cfwev_ruleuuid: Uuid,
+    pub event: CfwEvType,
+    #[serde(skip)]
+    pub length: u16,
+    #[serde(skip)]
+    pub zonedid: u32,
+    #[serde(skip)]
+    pub rule_id: u16,
+    pub protocol: Protocol,
+    pub direction: Direction,
+    pub source_port: u16,
+    pub destination_port: u16,
+    pub source_ip: IpAddr,
+    pub destination_ip: IpAddr,
+    pub timestamp: String,
+    #[serde(rename = "rule")]
+    pub rule_uuid: Uuid,
 }
 
 // Parse an entire event
 named!(pub traffic_event( &[u8] ) -> CfwEvent,
     do_parse!(
-        cfwev_type: le_u16 >>
-        cfwev_length: le_u16 >>
-        cfwev_zonedid: le_u32 >>
-        cfwev_ruleid: le_u16 >>
-        cfwev_protocol: take!(1) >>
-        cfwev_direction: take!(1) >>
-        cfwev_sport: be_u16 >>
-        cfwev_dport: be_u16 >>
-        cfwev_saddr: be_u128 >>
-        cfwev_daddr: be_u128 >>
-        cfwev_time_sec: le_u64 >>
-        cfwev_time_usec: le_u64 >>
-        cfwev_ruleuuid: take!(16) >>
+        event: le_u16 >>
+        length: le_u16 >>
+        zonedid: le_u32 >>
+        rule_id: le_u16 >>
+        protocol: take!(1) >>
+        direction: take!(1) >>
+        source_port: be_u16 >>
+        destination_port: be_u16 >>
+        source_ip: be_u128 >>
+        destination_ip: be_u128 >>
+        time_sec: le_u64 >>
+        time_usec: le_u64 >>
+        rule_uuid: take!(16) >>
         (
             CfwEvent::Traffic(TrafficEvent{
-                cfwev_type: CfwEvType::from(cfwev_type),
-                cfwev_length,
-                cfwev_zonedid,
-                cfwev_ruleid,
-                cfwev_protocol: Protocol::from(cfwev_protocol[0]),
-                cfwev_direction: Direction::from(cfwev_direction[0]),
-                cfwev_sport,
-                cfwev_dport,
-                cfwev_saddr: IpAddr::from(cfwev_saddr.to_be_bytes()),
-                cfwev_daddr: IpAddr::from(cfwev_daddr.to_be_bytes()),
-                cfwev_tstamp: Utc.timestamp(cfwev_time_sec as i64, cfwev_time_usec as u32).to_string(),
-                cfwev_ruleuuid: Uuid::from_slice(cfwev_ruleuuid)
+                event: CfwEvType::from(event),
+                length,
+                zonedid,
+                rule_id,
+                protocol: Protocol::from(protocol[0]),
+                direction: Direction::from(direction[0]),
+                source_port,
+                destination_port,
+                source_ip: IpAddr::from(source_ip.to_be_bytes()),
+                destination_ip: IpAddr::from(destination_ip.to_be_bytes()),
+                timestamp: Utc.timestamp(time_sec as i64, time_usec as u32).to_string(),
+                rule_uuid: Uuid::from_slice(rule_uuid)
                     .expect("we should have 16 bytes exactly"),
             })
         )

@@ -15,18 +15,13 @@ use failure::{Error, ResultExt};
 
 mod parser;
 use parser::CfwEvent;
+use serde::Serialize;
 use vminfod::{EventType, Zone};
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct LogEvent {
-    event: String,
-    time: String,
-    source_ip: String,
-    destination_ip: String,
-    source_port: u16,
-    destination_port: u16,
-    protocol: String,
-    rule: String,
+    #[serde(flatten)]
+    event: CfwEvent,
     vm: String,
     alias: String,
 }
@@ -118,21 +113,14 @@ fn main() -> Result<(), Error> {
             match iresult {
                 Err(e) => println!("failed to parse event: {}", e),
                 Ok((_leftover_bytes, event)) => match event {
-                    CfwEvent::Traffic(ev) => {
+                    CfwEvent::Traffic(ref ev) => {
                         let r = vmobjs.read().unwrap();
-                        let pretty = LogEvent {
-                            event: "foo".to_string(),
-                            time: ev.cfwev_tstamp.clone(),
-                            source_ip: ev.cfwev_saddr.to_string(),
-                            destination_ip: ev.cfwev_daddr.to_string(),
-                            source_port: ev.cfwev_sport,
-                            destination_port: ev.cfwev_dport,
-                            protocol: "foo".to_string(),
-                            rule: ev.cfwev_ruleuuid.to_string(),
-                            vm: r[&ev.cfwev_zonedid].uuid.clone(),
-                            alias: r[&ev.cfwev_zonedid].alias.clone(),
+                        let log = LogEvent {
+                            vm: r[&ev.zonedid].uuid.clone(),
+                            alias: r[&ev.zonedid].alias.clone(),
+                            event: event,
                         };
-                        println!("{:#?}", pretty);
+                        println!("{}", serde_json::to_string(&log).unwrap());
                     }
                 },
             }
