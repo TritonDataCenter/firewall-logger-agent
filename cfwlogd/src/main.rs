@@ -83,6 +83,7 @@ fn main() -> Result<(), Error> {
     let mapping: HashMap<Zonedid, Zone> = HashMap::new();
     let vmobjs = Arc::new(ShardedLock::new(mapping));
 
+    #[allow(clippy::mutex_atomic)] // this lint doesn't realize we are using it with a CondVar
     let waiter = Arc::new((Mutex::new(false), Condvar::new()));
     let _vminfod_handle = start_vminfod(waiter.clone(), vmobjs.clone());
     let &(ref lock, ref cvar) = &*waiter;
@@ -123,7 +124,7 @@ fn main() -> Result<(), Error> {
                                 alias: r[&ev.zonedid].alias.clone(),
                                 event,
                             };
-                            write!(&mut logger, "{}\n", serde_json::to_string(&log).unwrap())
+                            writeln!(&mut logger, "{}", serde_json::to_string(&log).unwrap())
                                 .unwrap();
                         }
                     },
