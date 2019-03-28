@@ -135,6 +135,7 @@ fn main() -> Result<(), Error> {
 
     info!("now reading cfw events...");
     let mut buf = vec![0; BUFSIZE];
+    let mut drops = 0;
 
     loop {
         let mut offset = 0;
@@ -158,12 +159,14 @@ fn main() -> Result<(), Error> {
             // XXX: fan these events out to various per zone queues?
             // for now lets just send them to a thread that  prints something that resembles a log
             // line
-            if let Err(e) = log_tx.try_send((info, chunk.to_vec())) {
-                warn!(
-                    "processing thread is full, dropping event: {:?}",
-                    e.into_inner()
-                )
-            };
+            if log_tx.try_send((info, chunk.to_vec())).is_err() {
+                drops += 1;
+            }
+        }
+
+        if drops > 0 {
+            warn!("processing thread is full, dropped {} events", drops);
+            drops = 0;
         }
     }
     Ok(())
