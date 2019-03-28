@@ -10,11 +10,12 @@ extern crate nom;
 extern crate log;
 
 extern crate pretty_env_logger;
+use crossbeam::channel;
 use crossbeam::sync::ShardedLock;
 use failure::{Error, ResultExt};
 
 mod parser;
-use parser::CfwEvent;
+use parser::{CfwEvent, EventInfo};
 use serde::Serialize;
 use vminfod::{EventType, Zone};
 
@@ -79,6 +80,42 @@ fn main() -> Result<(), Error> {
 
     // open the cfw device
     let mut fd = File::open("/dev/ipfev").context("failed to open ipfev device")?;
+
+    let (log_tx, log_rx) = channel::bounded::<(EventInfo, Vec<u8>)>(2000);
+
+    let _logger_handle = thread::Builder::new()
+        .name("logger test".to_string())
+        .spawn(move || {
+            for (info, chunk) in log_rx.iter() {
+                let iresult = match info.event_type {
+                    parser::CfwEvType::Unknown => {
+                        warn!("unknown cfw event found: {:?}", &info);
+                        continue;
+                    }
+                    _ => parser::traffic_event(&chunk),
+                };
+
+                // XXX: fan these events out to various per zone queues?
+
+                // for now lets just print something that resembles a log line
+                match iresult {
+                    Err(e) => println!("failed to parse event: {}", e),
+                    Ok((_leftover_bytes, event)) => match event {
+                        CfwEvent::Traffic(ref ev) => {
+                            let r = vmobjs.read().unwrap();
+                            let log = LogEvent {
+                                vm: r[&ev.zonedid].uuid.clone(),
+                                alias: r[&ev.zonedid].alias.clone(),
+                                event,
+                            };
+                            println!("{}", serde_json::to_string(&log).unwrap());
+                        }
+                    },
+                }
+            }
+        })
+        .expect("vminfod client thread spawn failed.");
+
     let mut buf = vec![0; BUFSIZE];
 
     loop {
@@ -88,7 +125,7 @@ fn main() -> Result<(), Error> {
             .read(&mut buf)
             .context("failed to read from ipfev device")?;
         if size == 0 {
-            println!("read 0 bytes...exiting!");
+            warn!("read 0 bytes...exiting!");
             break;
         }
 
@@ -97,35 +134,15 @@ fn main() -> Result<(), Error> {
             let info = parser::peek_event(&buf[offset..])
                 .expect("peek at cfw event failed")
                 .1;
-
-            let iresult = match info.event_type {
-                parser::CfwEvType::Unknown => {
-                    warn!("unknown cfw event found: {:?}", &info);
-                    offset += info.length as usize;
-                    continue;
-                }
-                _ => parser::traffic_event(&buf),
-            };
-
-            // XXX: fan these events out to various per zone queues?
-
-            // for now lets just print something that resembles a log line
-            match iresult {
-                Err(e) => println!("failed to parse event: {}", e),
-                Ok((_leftover_bytes, event)) => match event {
-                    CfwEvent::Traffic(ref ev) => {
-                        let r = vmobjs.read().unwrap();
-                        let log = LogEvent {
-                            vm: r[&ev.zonedid].uuid.clone(),
-                            alias: r[&ev.zonedid].alias.clone(),
-                            event: event,
-                        };
-                        println!("{}", serde_json::to_string(&log).unwrap());
-                    }
-                },
-            }
-
+            let (chunk, _rhs) = buf.split_at(info.length as usize);
             offset += info.length as usize;
+
+            if let Err(e) = log_tx.try_send((info, chunk.to_vec())) {
+                warn!(
+                    "processing thread is full, dropping event: {:?}",
+                    e.into_inner()
+                )
+            };
         }
     }
     Ok(())

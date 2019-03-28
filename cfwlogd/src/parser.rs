@@ -6,6 +6,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum CfwEvType {
     Block,
     Begin,
@@ -25,6 +26,7 @@ impl From<u16> for CfwEvType {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Direction {
     In,
     Out,
