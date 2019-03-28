@@ -10,6 +10,7 @@ extern crate nom;
 extern crate log;
 
 extern crate pretty_env_logger;
+use bytes::Bytes;
 use crossbeam::channel;
 use crossbeam::sync::ShardedLock;
 use failure::{Error, ResultExt};
@@ -17,14 +18,14 @@ use failure::{Error, ResultExt};
 mod parser;
 use parser::{CfwEvent, EventInfo};
 use serde::Serialize;
-use vminfod::{EventType, Zone};
+use vminfod::Zone;
 
 #[derive(Debug, Serialize)]
-struct LogEvent {
+struct LogEvent<'a> {
     #[serde(flatten)]
     event: CfwEvent,
-    vm: String,
-    alias: String,
+    vm: &'a str,
+    alias: &'a str,
 }
 
 type Zonedid = u32;
@@ -54,17 +55,14 @@ fn start_vminfod(waiter: Waiter, vmobjs: Vmobjs) -> thread::JoinHandle<()> {
                 }
                 // Standard vminfod event
                 if let Some(vmobj) = event.vm {
-                    match event.event_type {
-                        EventType::Delete => {
-                            let mut w = vmobjs.write().unwrap();
-                            let _ = w.remove(&vmobj.zonedid);
-                        }
-                        // TODO: Look at modify events and only update if the alias changed
-                        _ => {
-                            let mut w = vmobjs.write().unwrap();
-                            w.insert(vmobj.zonedid, vmobj);
-                        }
-                    }
+                    // XXX: for now all vminfod events result in an update to the backing store.
+                    // In the future we need to look for an array of changes and only update under
+                    // certain conditions.
+                    //
+                    // We also don't want to delete a vmobj for zone that has been deleted because
+                    // there may still be logs queued up in processing threads that need the info
+                    let mut w = vmobjs.write().unwrap();
+                    w.insert(vmobj.zonedid, vmobj);
                 }
             }
             // TODO: implement retry logic here, until then just panic
@@ -96,7 +94,8 @@ fn main() -> Result<(), Error> {
     let mut fd = File::open("/dev/ipfev").context("failed to open ipfev device")?;
     info!("connected to /dev/ipfev");
 
-    let (log_tx, log_rx) = channel::bounded::<(EventInfo, Vec<u8>)>(2000);
+    //let (log_tx, log_rx) = channel::bounded::<(EventInfo, Vec<u8>)>(1_000_000);
+    let (log_tx, log_rx) = channel::unbounded::<(EventInfo, Bytes)>();
 
     let _logger_handle = thread::Builder::new()
         .name("logger test".to_string())
@@ -120,8 +119,8 @@ fn main() -> Result<(), Error> {
                         CfwEvent::Traffic(ref ev) => {
                             let r = vmobjs.read().unwrap();
                             let log = LogEvent {
-                                vm: r[&ev.zonedid].uuid.clone(),
-                                alias: r[&ev.zonedid].alias.clone(),
+                                vm: &r[&ev.zonedid].uuid,
+                                alias: &r[&ev.zonedid].alias,
                                 event,
                             };
                             writeln!(&mut logger, "{}", serde_json::to_string(&log).unwrap())
@@ -134,10 +133,10 @@ fn main() -> Result<(), Error> {
         .expect("vminfod client thread spawn failed.");
 
     info!("now reading cfw events...");
-    let mut buf = vec![0; BUFSIZE];
     let mut drops = 0;
 
     loop {
+        let mut buf = vec![0; BUFSIZE];
         let mut offset = 0;
 
         let size = fd
@@ -148,18 +147,26 @@ fn main() -> Result<(), Error> {
             break;
         }
 
+        // first chop off the wasted bytes
+        buf.truncate(size);
+        // then convert it to `Bytes` so that we can slice it up without copying the data a second
+        // time
+        let bytes = Bytes::from(buf);
+
         while offset < size as usize {
             // we should just panic if the first few bytes dont look like a cfw event
-            let info = parser::peek_event(&buf[offset..])
+            let info = parser::peek_event(&bytes[offset..])
                 .expect("peek at cfw event failed")
                 .1;
-            let (chunk, _rhs) = buf.split_at(info.length as usize);
-            offset += info.length as usize;
+            let size = info.length as usize;
+
+            let chunk = bytes.slice(offset, offset + size);
+            offset += size;
 
             // XXX: fan these events out to various per zone queues?
             // for now lets just send them to a thread that  prints something that resembles a log
             // line
-            if log_tx.try_send((info, chunk.to_vec())).is_err() {
+            if log_tx.try_send((info, chunk)).is_err() {
                 drops += 1;
             }
         }
