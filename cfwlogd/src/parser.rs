@@ -76,7 +76,16 @@ pub struct EventInfo {
     pub zonedid: u32,
 }
 
-// Parse an entire event
+/// Peek at the event size
+named!(pub peek_event_size( &[u8] ) -> usize,
+    do_parse!(
+        _event_type: take!(2)>>
+        length: le_u16 >>
+        (length as usize)
+    )
+);
+
+/// Peek at the first 8 byes aka the EventInfo
 named!(pub peek_event( &[u8] ) -> EventInfo,
     do_parse!(
         event_type: le_u16 >>

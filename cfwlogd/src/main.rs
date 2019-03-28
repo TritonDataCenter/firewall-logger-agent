@@ -16,7 +16,7 @@ use crossbeam::sync::ShardedLock;
 use failure::{Error, ResultExt};
 
 mod parser;
-use parser::{CfwEvent, EventInfo};
+use parser::CfwEvent;
 use serde::Serialize;
 use vminfod::Zone;
 
@@ -94,8 +94,8 @@ fn main() -> Result<(), Error> {
     let mut fd = File::open("/dev/ipfev").context("failed to open ipfev device")?;
     info!("connected to /dev/ipfev");
 
-    //let (log_tx, log_rx) = channel::bounded::<(EventInfo, Vec<u8>)>(1_000_000);
-    let (log_tx, log_rx) = channel::unbounded::<(EventInfo, Bytes)>();
+    //let (log_tx, log_rx) = channel::bounded::<Bytes>(1_000_000);
+    let (log_tx, log_rx) = channel::unbounded::<Bytes>();
 
     let _logger_handle = thread::Builder::new()
         .name("logger test".to_string())
@@ -104,14 +104,8 @@ fn main() -> Result<(), Error> {
             let tmp = File::create("/var/tmp/cfw.log").unwrap();
             let mut logger = BufWriter::new(tmp);
 
-            for (info, chunk) in log_rx.iter() {
-                let iresult = match info.event_type {
-                    parser::CfwEvType::Unknown => {
-                        warn!("unknown cfw event found: {:?}", &info);
-                        continue;
-                    }
-                    _ => parser::traffic_event(&chunk),
-                };
+            for chunk in log_rx.iter() {
+                let iresult = parser::traffic_event(&chunk);
 
                 match iresult {
                     Err(e) => println!("failed to parse event: {}", e),
@@ -136,7 +130,7 @@ fn main() -> Result<(), Error> {
     let mut drops = 0;
 
     loop {
-        let mut buf = vec![0; BUFSIZE];
+        let mut buf = [0; BUFSIZE];
         let mut offset = 0;
 
         let size = fd
@@ -147,18 +141,15 @@ fn main() -> Result<(), Error> {
             break;
         }
 
-        // first chop off the wasted bytes
-        buf.truncate(size);
-        // then convert it to `Bytes` so that we can slice it up without copying the data a second
-        // time
-        let bytes = Bytes::from(buf);
+        // Copy the bytes from the stack to the heap in a way that allows us to efficently slice
+        // them up into events
+        let bytes = Bytes::from(&buf[..size]);
 
         while offset < size as usize {
             // we should just panic if the first few bytes dont look like a cfw event
-            let info = parser::peek_event(&bytes[offset..])
+            let size = parser::peek_event_size(&bytes[offset..])
                 .expect("peek at cfw event failed")
                 .1;
-            let size = info.length as usize;
 
             let chunk = bytes.slice(offset, offset + size);
             offset += size;
@@ -166,7 +157,7 @@ fn main() -> Result<(), Error> {
             // XXX: fan these events out to various per zone queues?
             // for now lets just send them to a thread that  prints something that resembles a log
             // line
-            if log_tx.try_send((info, chunk)).is_err() {
+            if log_tx.try_send(chunk).is_err() {
                 drops += 1;
             }
         }
