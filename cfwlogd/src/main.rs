@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Read;
-use std::sync::Arc;
+use std::io::{BufWriter, Read, Write};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
 #[macro_use]
@@ -29,21 +29,28 @@ struct LogEvent {
 
 type Zonedid = u32;
 type Vmobjs = Arc<ShardedLock<HashMap<Zonedid, Zone>>>;
+type Waiter = Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>;
 
-fn start_vminfod(vmobjs: Vmobjs) -> thread::JoinHandle<()> {
+fn start_vminfod(waiter: Waiter, vmobjs: Vmobjs) -> thread::JoinHandle<()> {
     thread::Builder::new()
         .name("vminfod_event_processor".to_string())
         .spawn(move || {
             info!("starting vminfod thread");
+            let &(ref lock, ref cvar) = &*waiter;
             let (r, _) = vminfod::start_vminfod_stream();
             for event in r.iter() {
                 // We got a ready event that has the initial zones on the CN
                 if let Some(raw_vms) = event.vms {
+                    let mut ready = lock.lock().unwrap();
+                    // make sure we don't see another ready event in the future
+                    assert_eq!(*ready, false);
                     let vms: Vec<Zone> = serde_json::from_str(&raw_vms).unwrap();
                     let mut w = vmobjs.write().unwrap();
                     for vm in vms {
                         w.insert(vm.zonedid, vm);
                     }
+                    *ready = true;
+                    cvar.notify_one();
                 }
                 // Standard vminfod event
                 if let Some(vmobj) = event.vm {
@@ -76,16 +83,27 @@ fn main() -> Result<(), Error> {
     let mapping: HashMap<Zonedid, Zone> = HashMap::new();
     let vmobjs = Arc::new(ShardedLock::new(mapping));
 
-    let _vminfod_handle = start_vminfod(vmobjs.clone());
+    let waiter = Arc::new((Mutex::new(false), Condvar::new()));
+    let _vminfod_handle = start_vminfod(waiter.clone(), vmobjs.clone());
+    let &(ref lock, ref cvar) = &*waiter;
+    let mut ready = lock.lock().unwrap();
+    while !*ready {
+        ready = cvar.wait(ready).unwrap();
+    }
 
     // open the cfw device
     let mut fd = File::open("/dev/ipfev").context("failed to open ipfev device")?;
+    info!("connected to /dev/ipfev");
 
     let (log_tx, log_rx) = channel::bounded::<(EventInfo, Vec<u8>)>(2000);
 
     let _logger_handle = thread::Builder::new()
         .name("logger test".to_string())
         .spawn(move || {
+            // create or truncate file for testing
+            let tmp = File::create("/var/tmp/cfw.log").unwrap();
+            let mut logger = BufWriter::new(tmp);
+
             for (info, chunk) in log_rx.iter() {
                 let iresult = match info.event_type {
                     parser::CfwEvType::Unknown => {
@@ -95,9 +113,6 @@ fn main() -> Result<(), Error> {
                     _ => parser::traffic_event(&chunk),
                 };
 
-                // XXX: fan these events out to various per zone queues?
-
-                // for now lets just print something that resembles a log line
                 match iresult {
                     Err(e) => println!("failed to parse event: {}", e),
                     Ok((_leftover_bytes, event)) => match event {
@@ -108,7 +123,8 @@ fn main() -> Result<(), Error> {
                                 alias: r[&ev.zonedid].alias.clone(),
                                 event,
                             };
-                            println!("{}", serde_json::to_string(&log).unwrap());
+                            write!(&mut logger, "{}\n", serde_json::to_string(&log).unwrap())
+                                .unwrap();
                         }
                     },
                 }
@@ -116,6 +132,7 @@ fn main() -> Result<(), Error> {
         })
         .expect("vminfod client thread spawn failed.");
 
+    info!("now reading cfw events...");
     let mut buf = vec![0; BUFSIZE];
 
     loop {
@@ -137,6 +154,9 @@ fn main() -> Result<(), Error> {
             let (chunk, _rhs) = buf.split_at(info.length as usize);
             offset += info.length as usize;
 
+            // XXX: fan these events out to various per zone queues?
+            // for now lets just send them to a thread that  prints something that resembles a log
+            // line
             if let Err(e) = log_tx.try_send((info, chunk.to_vec())) {
                 warn!(
                     "processing thread is full, dropping event: {:?}",
