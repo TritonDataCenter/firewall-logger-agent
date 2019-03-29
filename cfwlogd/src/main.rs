@@ -10,34 +10,43 @@ extern crate nom;
 extern crate log;
 
 extern crate pretty_env_logger;
-use bytes::Bytes;
 use crossbeam::channel;
+use crossbeam::channel::Sender;
 use crossbeam::sync::ShardedLock;
 use failure::{Error, ResultExt};
 
+//mod ipf;
+mod ipf;
+mod logger;
 mod parser;
+use ipf::IpfevDevice;
 use parser::CfwEvent;
 use serde::Serialize;
 use vminfod::Zone;
 
 #[derive(Debug, Serialize)]
-struct LogEvent<'a> {
+struct LogEvent {
     #[serde(flatten)]
     event: CfwEvent,
-    vm: &'a str,
-    alias: &'a str,
+    vm: String,
+    alias: String,
 }
 
 type Zonedid = u32;
 type Vmobjs = Arc<ShardedLock<HashMap<Zonedid, Zone>>>;
-type Waiter = Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>;
+type Loggers = Arc<Mutex<HashMap<Zonedid, (Sender<LogEvent>, Sender<bool>)>>>;
 
-fn start_vminfod(waiter: Waiter, vmobjs: Vmobjs) -> thread::JoinHandle<()> {
-    thread::Builder::new()
+/// Start a vminfod watcher thread that will keep a `Vmobjs` object up-to-date.
+/// This function will block until the spawned thread has processed the `Ready` event from vminfod
+fn start_vminfod(vmobjs: Vmobjs, loggers: Loggers) -> thread::JoinHandle<()> {
+    #[allow(clippy::mutex_atomic)] // this lint doesn't realize we are using it with a CondVar
+    let waiter = Arc::new((Mutex::new(false), Condvar::new()));
+    let waiter2 = waiter.clone();
+    let handle = thread::Builder::new()
         .name("vminfod_event_processor".to_string())
         .spawn(move || {
             info!("starting vminfod thread");
-            let &(ref lock, ref cvar) = &*waiter;
+            let &(ref lock, ref cvar) = &*waiter2;
             let (r, _) = vminfod::start_vminfod_stream();
             for event in r.iter() {
                 // We got a ready event that has the initial zones on the CN
@@ -47,7 +56,13 @@ fn start_vminfod(waiter: Waiter, vmobjs: Vmobjs) -> thread::JoinHandle<()> {
                     assert_eq!(*ready, false);
                     let vms: Vec<Zone> = serde_json::from_str(&raw_vms).unwrap();
                     let mut w = vmobjs.write().unwrap();
+                    let mut loggers = loggers.lock().unwrap();
                     for vm in vms {
+                        if vm.firewall_enabled {
+                            let channels =
+                                logger::start_logger(vm.owner_uuid.clone(), vm.uuid.clone());
+                            loggers.insert(vm.zonedid, channels);
+                        }
                         w.insert(vm.zonedid, vm);
                     }
                     *ready = true;
@@ -62,109 +77,86 @@ fn start_vminfod(waiter: Waiter, vmobjs: Vmobjs) -> thread::JoinHandle<()> {
                     // We also don't want to delete a vmobj for zone that has been deleted because
                     // there may still be logs queued up in processing threads that need the info
                     let mut w = vmobjs.write().unwrap();
+                    let mut loggers = loggers.lock().unwrap();
+                    if vmobj.firewall_enabled && !loggers.contains_key(&vmobj.zonedid) {
+                        let channels =
+                            logger::start_logger(vmobj.owner_uuid.clone(), vmobj.uuid.clone());
+                        loggers.insert(vmobj.zonedid, channels);
+                    }
                     w.insert(vmobj.zonedid, vmobj);
                 }
             }
             // TODO: implement retry logic here, until then just panic
             panic!("vminfod event stream closed");
         })
-        .expect("vminfod client thread spawn failed.")
-}
+        .expect("vminfod client thread spawn failed.");
 
-fn main() -> Result<(), Error> {
-    // Current size of the ring buffer at the time of writing this code
-    const BUFSIZE: usize = 81920;
-
-    // setup our logger
-    pretty_env_logger::init();
-
-    let mapping: HashMap<Zonedid, Zone> = HashMap::new();
-    let vmobjs = Arc::new(ShardedLock::new(mapping));
-
-    #[allow(clippy::mutex_atomic)] // this lint doesn't realize we are using it with a CondVar
-    let waiter = Arc::new((Mutex::new(false), Condvar::new()));
-    let _vminfod_handle = start_vminfod(waiter.clone(), vmobjs.clone());
     let &(ref lock, ref cvar) = &*waiter;
     let mut ready = lock.lock().unwrap();
     while !*ready {
         ready = cvar.wait(ready).unwrap();
     }
 
-    // open the cfw device
-    let mut fd = File::open("/dev/ipfev").context("failed to open ipfev device")?;
-    info!("connected to /dev/ipfev");
+    handle
+}
 
-    //let (log_tx, log_rx) = channel::bounded::<Bytes>(1_000_000);
-    let (log_tx, log_rx) = channel::unbounded::<Bytes>();
+fn main() -> Result<(), Error> {
+    // setup our logger
+    pretty_env_logger::init();
 
-    let _logger_handle = thread::Builder::new()
+    /// This is hardcoded until `/dev/ipfev` provides an ioctl interface that can tell us a few
+    /// things like size of the largest event type, and size of the internal ring buffer
+    const BUFSIZE: usize = 81920;
+    let mapping: HashMap<Zonedid, Zone> = HashMap::new();
+    let vmobjs = Arc::new(ShardedLock::new(mapping));
+    let channels: HashMap<Zonedid, (Sender<LogEvent>, Sender<bool>)> = HashMap::new();
+    let loggers = Arc::new(Mutex::new(channels));
+
+    let _vminfod_handle = start_vminfod(vmobjs.clone(), loggers.clone());
+
+    let (log_tx, log_rx) = channel::unbounded::<CfwEvent>();
+    let _fan_out = thread::Builder::new()
         .name("logger test".to_string())
         .spawn(move || {
-            // create or truncate file for testing
-            let tmp = File::create("/var/tmp/cfw.log").unwrap();
-            let mut logger = BufWriter::new(tmp);
+            for event in log_rx.iter() {
+                let r = vmobjs.read().unwrap();
+                let zonedid = event.zone();
+                let log = LogEvent {
+                    vm: r[&zonedid].uuid.clone(),
+                    alias: r[&zonedid].alias.clone(),
+                    event,
+                };
 
-            for chunk in log_rx.iter() {
-                let iresult = parser::traffic_event(&chunk);
-
-                match iresult {
-                    Err(e) => println!("failed to parse event: {}", e),
-                    Ok((_leftover_bytes, event)) => match event {
-                        CfwEvent::Traffic(ref ev) => {
-                            let r = vmobjs.read().unwrap();
-                            let log = LogEvent {
-                                vm: &r[&ev.zonedid].uuid,
-                                alias: &r[&ev.zonedid].alias,
-                                event,
-                            };
-                            writeln!(&mut logger, "{}", serde_json::to_string(&log).unwrap())
-                                .unwrap();
-                        }
-                    },
+                // this may get too hot
+                let r = loggers.lock().unwrap();
+                match r.get(&log.event.zone()) {
+                    Some((events, _)) => {
+                        events.send(log).unwrap();
+                    }
+                    None => warn!("log event seen for zone with no loggers"),
                 }
             }
         })
-        .expect("vminfod client thread spawn failed.");
+        .expect("fan_out thread spawn failed.");
 
+    // open the cfw device
+    let mut device = IpfevDevice::new("/dev/ipfev")?;
     info!("now reading cfw events...");
-    let mut drops = 0;
+
+    let mut buf = [0; BUFSIZE];
 
     loop {
-        let mut buf = [0; BUFSIZE];
         let mut offset = 0;
 
-        let size = fd
-            .read(&mut buf)
+        let size = device
+            .read_events(&mut buf)
             .context("failed to read from ipfev device")?;
-        if size == 0 {
-            warn!("read 0 bytes...exiting!");
-            break;
-        }
 
-        // Copy the bytes from the stack to the heap in a way that allows us to efficently slice
-        // them up into events
-        let bytes = Bytes::from(&buf[..size]);
-
-        while offset < size as usize {
-            // we should just panic if the first few bytes dont look like a cfw event
-            let size = parser::peek_event_size(&bytes[offset..])
-                .expect("peek at cfw event failed")
-                .1;
-
-            let chunk = bytes.slice(offset, offset + size);
-            offset += size;
-
-            // XXX: fan these events out to various per zone queues?
-            // for now lets just send them to a thread that  prints something that resembles a log
-            // line
-            if log_tx.try_send(chunk).is_err() {
-                drops += 1;
-            }
-        }
-
-        if drops > 0 {
-            warn!("processing thread is full, dropped {} events", drops);
-            drops = 0;
+        while offset < size {
+            /// XXX: Support other/unknown event types
+            let event = parser::traffic_event(&buf).unwrap().1;
+            offset += event.len();
+            log_tx.send(event).unwrap();
         }
     }
     Ok(())

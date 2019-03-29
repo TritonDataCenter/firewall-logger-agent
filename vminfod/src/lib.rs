@@ -26,6 +26,7 @@ pub struct Zone {
     pub uuid: String,
     pub alias: String,
     pub owner_uuid: String,
+    pub firewall_enabled: bool,
     pub zonedid: u32,
 }
 

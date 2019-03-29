@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use nom::{be_u128, be_u16, le_u16, le_u32, le_u64};
 use serde::Serialize;
 use uuid::Uuid;
@@ -107,6 +107,20 @@ pub enum CfwEvent {
     Traffic(TrafficEvent),
 }
 
+impl CfwEvent {
+    pub fn len(&self) -> usize {
+        match &*self {
+            CfwEvent::Traffic(event) => event.length as usize,
+        }
+    }
+
+    pub fn zone(&self) -> u32 {
+        match &*self {
+            CfwEvent::Traffic(event) => event.zonedid,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct TrafficEvent {
     pub event: CfwEvType,
@@ -122,7 +136,7 @@ pub struct TrafficEvent {
     pub destination_port: u16,
     pub source_ip: IpAddr,
     pub destination_ip: IpAddr,
-    pub timestamp: String,
+    pub timestamp: DateTime<Utc>,
     #[serde(rename = "rule")]
     pub rule_uuid: Uuid,
 }
@@ -155,7 +169,7 @@ named!(pub traffic_event( &[u8] ) -> CfwEvent,
                 destination_port,
                 source_ip: IpAddr::from(source_ip.to_be_bytes()),
                 destination_ip: IpAddr::from(destination_ip.to_be_bytes()),
-                timestamp: Utc.timestamp(time_sec as i64, time_usec as u32).to_string(),
+                timestamp: Utc.timestamp(time_sec as i64, time_usec as u32),
                 rule_uuid: Uuid::from_slice(rule_uuid)
                     .expect("we should have 16 bytes exactly"),
             })
