@@ -2,8 +2,6 @@ use failure::{Error, ResultExt};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
-use std::thread;
 
 /// Wrapper around the ipfev device
 pub struct IpfevDevice {
@@ -31,20 +29,3 @@ impl IpfevDevice {
         Ok(size)
     }
 }
-
-// Start a thread that will be reading events from the `IpfevDevice`
-// and put them in a queue
-//pub fn start_reader(device: IpfevDevice) -> thread::JoinHandle<()> {
-//    thread::Builder::new()
-//        .name("ipfreader".to_string())
-//        .spawn(move || {
-//            let mut buf = [0; 100];
-//            loop {
-//                device.fd.read_events(&mut buf).unwrap();
-//
-//                drop(ipf);
-//                // process the bytes
-//            }
-//        })
-//        .expect("failed to spawn IpfReader thread")
-//}

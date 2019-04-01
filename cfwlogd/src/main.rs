@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufWriter, Read, Write};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
@@ -62,26 +60,24 @@ fn start_vminfod(vmobjs: Vmobjs, loggers: Loggers) -> thread::JoinHandle<()> {
                             let channels =
                                 logger::start_logger(vm.owner_uuid.clone(), vm.uuid.clone());
                             loggers.insert(vm.zonedid, channels);
+                            info!("started loggger for zone {}", &vm.uuid);
                         }
                         w.insert(vm.zonedid, vm);
                     }
                     *ready = true;
+                    debug!("ready event processed");
                     cvar.notify_one();
                 }
                 // Standard vminfod event
                 if let Some(vmobj) = event.vm {
-                    // XXX: for now all vminfod events result in an update to the backing store.
-                    // In the future we need to look for an array of changes and only update under
-                    // certain conditions.
-                    //
-                    // We also don't want to delete a vmobj for zone that has been deleted because
-                    // there may still be logs queued up in processing threads that need the info
+                    debug!("processing event for zone: {:?}", &vmobj);
                     let mut w = vmobjs.write().unwrap();
                     let mut loggers = loggers.lock().unwrap();
                     if vmobj.firewall_enabled && !loggers.contains_key(&vmobj.zonedid) {
                         let channels =
                             logger::start_logger(vmobj.owner_uuid.clone(), vmobj.uuid.clone());
                         loggers.insert(vmobj.zonedid, channels);
+                        info!("started loggger for zone {}", &vmobj.uuid);
                     }
                     w.insert(vmobj.zonedid, vmobj);
                 }
@@ -116,14 +112,21 @@ fn main() -> Result<(), Error> {
 
     let (log_tx, log_rx) = channel::unbounded::<CfwEvent>();
     let _fan_out = thread::Builder::new()
-        .name("logger test".to_string())
+        .name("event-fan-out".to_string())
         .spawn(move || {
             for event in log_rx.iter() {
                 let r = vmobjs.read().unwrap();
                 let zonedid = event.zone();
+                let vmobj = match r.get(&zonedid) {
+                    Some(v) => v,
+                    None => {
+                        warn!("cfwlogd doesn't yet know about zone {}", &zonedid);
+                        continue;
+                    }
+                };
                 let log = LogEvent {
-                    vm: r[&zonedid].uuid.clone(),
-                    alias: r[&zonedid].alias.clone(),
+                    vm: vmobj.uuid.clone(),
+                    alias: vmobj.alias.clone(),
                     event,
                 };
 
@@ -153,11 +156,15 @@ fn main() -> Result<(), Error> {
             .context("failed to read from ipfev device")?;
 
         while offset < size {
-            /// XXX: Support other/unknown event types
+            // XXX: Support other/unknown event types
             let event = parser::traffic_event(&buf).unwrap().1;
             offset += event.len();
             log_tx.send(event).unwrap();
         }
     }
+
+    // main returns a result so we can use "?" even though the loop above stops us from ever
+    // reaching this return value
+    #[allow(unreachable_code)]
     Ok(())
 }

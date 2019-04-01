@@ -36,6 +36,13 @@ pub struct VminfodEvent {
     pub event_type: EventType,
     pub vms: Option<String>,
     pub vm: Option<Zone>,
+    pub changes: Option<Changes>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Changes {
+    #[serde(rename = "prettyPath")]
+    pub pretty_path: String,
 }
 
 /// Starts a new thread that runs a tokio executor/runtime responsible for watching a vminfod event

@@ -69,13 +69,6 @@ impl From<u8> for Protocol {
     }
 }
 
-#[derive(Debug, Serialize)]
-pub struct EventInfo {
-    pub event_type: CfwEvType,
-    pub length: u16,
-    pub zonedid: u32,
-}
-
 /// Peek at the event size
 named!(pub peek_event_size( &[u8] ) -> usize,
     do_parse!(
@@ -85,21 +78,28 @@ named!(pub peek_event_size( &[u8] ) -> usize,
     )
 );
 
-/// Peek at the first 8 byes aka the EventInfo
-named!(pub peek_event( &[u8] ) -> EventInfo,
-    do_parse!(
-        event_type: le_u16 >>
-        length: le_u16 >>
-        zonedid: le_u32 >>
-        (
-            EventInfo{
-                event_type: CfwEvType::from(event_type),
-                length,
-                zonedid,
-            }
-        )
-    )
-);
+// #[derive(Debug, Serialize)]
+// pub struct EventInfo {
+//     pub event_type: CfwEvType,
+//     pub length: u16,
+//     pub zonedid: u32,
+// }
+//
+// /// Peek at the first 8 byes aka the EventInfo
+// named!(pub peek_event( &[u8] ) -> EventInfo,
+//     do_parse!(
+//         event_type: le_u16 >>
+//         length: le_u16 >>
+//         zonedid: le_u32 >>
+//         (
+//             EventInfo{
+//                 event_type: CfwEvType::from(event_type),
+//                 length,
+//                 zonedid,
+//             }
+//         )
+//     )
+// );
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]

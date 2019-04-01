@@ -18,7 +18,7 @@ where
     T: Serialize + Send + 'static,
 {
     thread::Builder::new()
-        .name("logger".to_string())
+        .name(format!("logger-{}", &vm))
         .spawn(move || {
             // XXX currently truncating the log file at startup
             // and currently crashing if the file cant be created
@@ -55,6 +55,7 @@ where
                     // Other side disconnected so we shutdown
                     _ => {
                         logger.flush().unwrap();
+                        info!("{} logger shutting down", &customer);
                         break;
                     }
                 }
