@@ -10,7 +10,14 @@ use std::string::FromUtf8Error;
 #[derive(Debug)]
 enum Error {
     Hyper(hyper::Error),
+    Serde(serde_json::error::Error),
     FromUtf8(FromUtf8Error),
+}
+
+impl From<serde_json::error::Error> for Error {
+    fn from(err: serde_json::error::Error) -> Error {
+        Error::Serde(err)
+    }
 }
 
 impl From<FromUtf8Error> for Error {
@@ -46,7 +53,7 @@ impl Client {
             .and_then(|res| {
                 Lines::new(res.into_body().map_err(Error::Hyper))
                     .for_each(move |line| {
-                        let event: VminfodEvent = serde_json::from_str(&line).unwrap();
+                        let event: VminfodEvent = serde_json::from_str(&line)?;
                         tx.send(event).unwrap();
                         Ok(())
                     })

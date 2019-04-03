@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 #[macro_use]
@@ -17,10 +17,12 @@ use failure::{Error, ResultExt};
 mod ipf;
 mod logger;
 mod parser;
+mod zones;
 use ipf::IpfevDevice;
 use parser::CfwEvent;
 use serde::Serialize;
 use vminfod::Zone;
+use zones::Zonedid;
 
 #[derive(Debug, Serialize)]
 struct LogEvent {
@@ -30,74 +32,9 @@ struct LogEvent {
     alias: String,
 }
 
-type Zonedid = u32;
-type Vmobjs = Arc<ShardedLock<HashMap<Zonedid, Zone>>>;
 type Loggers = Arc<Mutex<HashMap<Zonedid, (Sender<LogEvent>, Sender<bool>)>>>;
 
-/// Start a vminfod watcher thread that will keep a `Vmobjs` object up-to-date.
-/// This function will block until the spawned thread has processed the `Ready` event from vminfod
-fn start_vminfod(vmobjs: Vmobjs, loggers: Loggers) -> thread::JoinHandle<()> {
-    #[allow(clippy::mutex_atomic)] // this lint doesn't realize we are using it with a CondVar
-    let waiter = Arc::new((Mutex::new(false), Condvar::new()));
-    let waiter2 = waiter.clone();
-    let handle = thread::Builder::new()
-        .name("vminfod_event_processor".to_string())
-        .spawn(move || {
-            info!("starting vminfod thread");
-            let &(ref lock, ref cvar) = &*waiter2;
-            let (r, _) = vminfod::start_vminfod_stream();
-            for event in r.iter() {
-                // We got a ready event that has the initial zones on the CN
-                if let Some(raw_vms) = event.vms {
-                    let mut ready = lock.lock().unwrap();
-                    // make sure we don't see another ready event in the future
-                    assert_eq!(*ready, false);
-                    let vms: Vec<Zone> = serde_json::from_str(&raw_vms).unwrap();
-                    let mut w = vmobjs.write().unwrap();
-                    let mut loggers = loggers.lock().unwrap();
-                    for vm in vms {
-                        if vm.firewall_enabled {
-                            let channels =
-                                logger::start_logger(vm.owner_uuid.clone(), vm.uuid.clone());
-                            loggers.insert(vm.zonedid, channels);
-                            info!("started loggger for zone {}", &vm.uuid);
-                        }
-                        w.insert(vm.zonedid, vm);
-                    }
-                    *ready = true;
-                    debug!("ready event processed");
-                    cvar.notify_one();
-                }
-                // Standard vminfod event
-                if let Some(vmobj) = event.vm {
-                    debug!("processing event for zone: {:?}", &vmobj);
-                    let mut w = vmobjs.write().unwrap();
-                    let mut loggers = loggers.lock().unwrap();
-                    if vmobj.firewall_enabled && !loggers.contains_key(&vmobj.zonedid) {
-                        let channels =
-                            logger::start_logger(vmobj.owner_uuid.clone(), vmobj.uuid.clone());
-                        loggers.insert(vmobj.zonedid, channels);
-                        info!("started loggger for zone {}", &vmobj.uuid);
-                    }
-                    w.insert(vmobj.zonedid, vmobj);
-                }
-            }
-            // TODO: implement retry logic here, until then just panic
-            panic!("vminfod event stream closed");
-        })
-        .expect("vminfod client thread spawn failed.");
-
-    let &(ref lock, ref cvar) = &*waiter;
-    let mut ready = lock.lock().unwrap();
-    while !*ready {
-        ready = cvar.wait(ready).unwrap();
-    }
-
-    handle
-}
-
 fn main() -> Result<(), Error> {
-    // setup our logger
     pretty_env_logger::init();
 
     /// This is hardcoded until `/dev/ipfev` provides an ioctl interface that can tell us a few
@@ -108,7 +45,7 @@ fn main() -> Result<(), Error> {
     let channels: HashMap<Zonedid, (Sender<LogEvent>, Sender<bool>)> = HashMap::new();
     let loggers = Arc::new(Mutex::new(channels));
 
-    let _vminfod_handle = start_vminfod(vmobjs.clone(), loggers.clone());
+    let _vminfod_handle = zones::start_vminfod(vmobjs.clone());
 
     let (log_tx, log_rx) = channel::unbounded::<CfwEvent>();
     let _fan_out = thread::Builder::new()

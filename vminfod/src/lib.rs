@@ -10,15 +10,38 @@ use client::Client;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
-pub enum EventType {
+#[serde(tag = "type")]
+pub enum VminfodEvent {
     #[serde(rename = "ready")]
-    Ready,
+    Ready(ReadyEvent),
     #[serde(rename = "create")]
-    Create,
+    Create(CreateEvent),
     #[serde(rename = "modify")]
-    Modify,
+    Modify(ModifyEvent),
     #[serde(rename = "delete")]
-    Delete,
+    Delete(DeleteEvent),
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ReadyEvent {
+    pub vms: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct CreateEvent {
+    pub vm: Zone,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ModifyEvent {
+    pub vm: Zone,
+    pub changes: Vec<Changes>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct DeleteEvent {
+    pub zonename: String,
+    pub uuid: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -31,18 +54,8 @@ pub struct Zone {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct VminfodEvent {
-    #[serde(rename = "type")]
-    pub event_type: EventType,
-    pub vms: Option<String>,
-    pub vm: Option<Zone>,
-    pub changes: Option<Changes>,
-}
-
-#[derive(Deserialize, Debug)]
 pub struct Changes {
-    #[serde(rename = "prettyPath")]
-    pub pretty_path: String,
+    pub path: Vec<Option<String>>,
 }
 
 /// Starts a new thread that runs a tokio executor/runtime responsible for watching a vminfod event
