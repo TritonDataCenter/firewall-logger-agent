@@ -39,7 +39,6 @@ fn main() -> Result<(), Error> {
 
     /// This is hardcoded until `/dev/ipfev` provides an ioctl interface that can tell us a few
     /// things like size of the largest event type, and size of the internal ring buffer
-    const BUFSIZE: usize = 81920;
     let mapping: HashMap<Zonedid, Zone> = HashMap::new();
     let vmobjs = Arc::new(ShardedLock::new(mapping));
     let channels: HashMap<Zonedid, (Sender<LogEvent>, Sender<bool>)> = HashMap::new();
