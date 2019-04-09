@@ -143,7 +143,10 @@ fn queue_zone_event(info: &EventInfo, event: Bytes, vmobjs: &Vmobjs, loggers: &m
     let logger = match loggers.entry(info.zonedid) {
         Entry::Occupied(entry) => entry.into_mut(),
         Entry::Vacant(entry) => match logger::start_logger(info.zonedid, vmobjs.clone()) {
-            Some(logger) => entry.insert(logger),
+            Some(logger) => {
+                info!("new logging thread started for zonedid {}", info.zonedid);
+                entry.insert(logger)
+            }
             None => {
                 // XXX CMON
                 error!(
@@ -185,7 +188,7 @@ pub fn start_eventprocessor(
                             parser::peek_event(&bytes[offset..]).expect("failed to peek at event");
                         let size = info.length as usize;
 
-                        let event = bytes.slice(offset, size);
+                        let event = bytes.slice(offset, offset + size);
                         queue_zone_event(&info, event, &vmobjs, &mut loggers2);
 
                         offset += size;
