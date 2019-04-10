@@ -47,7 +47,7 @@ pub struct DeleteEvent {
 #[derive(Deserialize, Debug)]
 pub struct Zone {
     pub uuid: String,
-    pub alias: String,
+    pub alias: Option<String>,
     pub owner_uuid: String,
     pub firewall_enabled: bool,
     pub zonedid: u32,

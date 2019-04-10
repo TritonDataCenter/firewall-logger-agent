@@ -165,6 +165,7 @@ fn queue_zone_event(info: &EventInfo, event: Bytes, vmobjs: &Vmobjs, loggers: &m
             "failed to log event for zone {} (logger channel disconnected)",
             info.zonedid
         );
+        logger.shutdown();
         loggers.remove(&info.zonedid);
     }
 }
