@@ -69,7 +69,9 @@ fn log_event<W: Write>(bytes: Bytes, writer: &mut W, vmobjs: &Vmobjs) {
         vm: &vmobj.uuid,
         alias: &alias,
     };
-    writeln!(writer, "{}", serde_json::to_string(&event).unwrap()).unwrap();
+    //writeln!(writer, "{}", serde_json::to_string(&event).unwrap()).unwrap();
+    serde_json::to_writer(&mut *writer, &event).unwrap();
+    writer.write(b"\n").unwrap();
 }
 
 fn _start_logger(
@@ -82,7 +84,7 @@ fn _start_logger(
     thread::Builder::new()
         .name("logger".to_string())
         .spawn(move || {
-            let mut file = match open_file(vm, customer) {
+            let file = match open_file(vm, customer) {
                 Ok(file) => file,
                 Err(e) => {
                     // XXX CMON?
@@ -109,6 +111,7 @@ fn _start_logger(
                             match signal {
                                 LoggerSignal::Rotate => (),
                                 LoggerSignal::Shutdown => {
+                                    // XXX close the recv queue and drain it?
                                     let _res = writer.flush();
                                     break;
                                 }
