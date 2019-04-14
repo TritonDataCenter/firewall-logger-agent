@@ -2,6 +2,7 @@ use crate::parser::{self, CfwEvent};
 use crate::zones::{Vmobjs, Zonedid};
 use bytes::Bytes;
 use crossbeam::channel::{self, select, Receiver, SendError, Sender};
+use failure::Error;
 use serde::Serialize;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -54,7 +55,7 @@ fn open_file(vm: String, customer: String) -> std::io::Result<File> {
     Ok(File::create(path)?)
 }
 
-fn log_event<W: Write>(bytes: Bytes, writer: &mut W, vmobjs: &Vmobjs) {
+fn log_event<W: Write>(bytes: Bytes, mut writer: W, vmobjs: &Vmobjs) -> Result<(), Error> {
     // force the event type for now
     let event = parser::traffic_event(&bytes).unwrap().1;
     let vmobjs = vmobjs.read().unwrap();
@@ -69,9 +70,9 @@ fn log_event<W: Write>(bytes: Bytes, writer: &mut W, vmobjs: &Vmobjs) {
         vm: &vmobj.uuid,
         alias: &alias,
     };
-    //writeln!(writer, "{}", serde_json::to_string(&event).unwrap()).unwrap();
-    serde_json::to_writer(&mut *writer, &event).unwrap();
-    writer.write(b"\n").unwrap();
+    serde_json::to_writer(&mut writer, &event)?;
+    writer.write(b"\n")?;
+    Ok(())
 }
 
 fn _start_logger(
@@ -95,14 +96,16 @@ fn _start_logger(
 
             // TODO figure out how much to buffer before a write. This is completely a guess right
             // now.
-            let mut writer = BufWriter::with_capacity(10 * 1024 * 1024, file);
+            let mut writer = BufWriter::with_capacity(1024 * 1024, file);
 
             loop {
                 select! {
                     recv(events) -> bytes => {
                         // TODO handle disconnected channel
                         if let Ok(bytes) = bytes {
-                            log_event(bytes, &mut writer, &vmobjs);
+                            if let Err(e) = log_event(bytes, &mut writer, &vmobjs) {
+                                error!("failed to log event: {}", e);
+                            }
                         }
                     }
                     recv(signal) -> signal => {
