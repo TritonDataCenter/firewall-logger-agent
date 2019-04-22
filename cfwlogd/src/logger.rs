@@ -1,14 +1,13 @@
 use crate::parser::{self, CfwEvent};
 use crate::zones::{Vmobjs, Zonedid};
 use bytes::Bytes;
-use crossbeam::channel::{self, select, Receiver, SendError, Sender};
+use crossbeam::channel::{self, select, SendError};
 use failure::Error;
 use serde::Serialize;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::thread;
-use std::time::Duration;
 
 #[derive(Debug, Serialize)]
 struct LogEvent<'a> {
@@ -37,8 +36,15 @@ impl Logger {
         self.sender.send(b)
     }
 
-    pub fn shutdown(&self) -> Result<(), SendError<LoggerSignal>> {
-        self.signal.send(LoggerSignal::Shutdown)
+    pub fn rotate(&self) -> Result<(), SendError<LoggerSignal>> {
+        self.signal.send(LoggerSignal::Rotate)
+    }
+
+    pub fn shutdown(self) -> Result<(), SendError<LoggerSignal>> {
+        self.signal.send(LoggerSignal::Shutdown).and_then(|_| {
+            self.handle.join().unwrap();
+            Ok(())
+        })
     }
 }
 
@@ -53,6 +59,10 @@ fn open_file(vm: String, customer: String) -> std::io::Result<File> {
     // TODO instead of truncating the existing file we should try to stat it first and open it or
     // rotate it before creating the new file
     Ok(File::create(path)?)
+}
+
+fn rotate_log() {
+    unimplemented!();
 }
 
 fn log_event<W: Write>(bytes: Bytes, mut writer: W, vmobjs: &Vmobjs) -> Result<(), Error> {
@@ -71,7 +81,7 @@ fn log_event<W: Write>(bytes: Bytes, mut writer: W, vmobjs: &Vmobjs) -> Result<(
         alias: &alias,
     };
     serde_json::to_writer(&mut writer, &event)?;
-    writer.write(b"\n")?;
+    writer.write_all(b"\n")?;
     Ok(())
 }
 
@@ -112,17 +122,22 @@ fn _start_logger(
                         // TODO handle disconnected channel
                         if let Ok(signal) = signal {
                             match signal {
-                                LoggerSignal::Rotate => (),
-                                LoggerSignal::Shutdown => {
-                                    // XXX close the recv queue and drain it?
-                                    let _res = writer.flush();
-                                    break;
-                                }
+                                LoggerSignal::Rotate => rotate_log(),
+                                LoggerSignal::Shutdown => break,
                             }
                         }
                     }
                 }
             }
+
+            // We are shutting down now so we drain the channel and then drop it
+            for bytes in events.try_iter() {
+                if let Err(e) = log_event(bytes, &mut writer, &vmobjs) {
+                    error!("failed to log event: {}", e);
+                }
+            }
+            drop(events);
+            let _res = writer.flush();
         })
         .expect("failed to spawn IpfReader thread")
 }
