@@ -21,7 +21,7 @@ pub fn start_vminfod(vmobjs: Vmobjs) -> thread::JoinHandle<()> {
     let waiter = Arc::new((Mutex::new(false), Condvar::new()));
     let waiter2 = waiter.clone();
     let handle = thread::Builder::new()
-        .name("vminfod_event_processor".to_string())
+        .name("vminfod_event_processor".to_owned())
         .spawn(move || {
             info!("starting vminfod thread");
             let &(ref lock, ref cvar) = &*waiter2;

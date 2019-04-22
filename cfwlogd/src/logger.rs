@@ -93,7 +93,7 @@ fn _start_logger(
     signal: channel::Receiver<LoggerSignal>,
 ) -> thread::JoinHandle<()> {
     thread::Builder::new()
-        .name("logger".to_string())
+        .name("logger".to_owned())
         .spawn(move || {
             let file = match open_file(vm, customer) {
                 Ok(file) => file,

@@ -50,12 +50,12 @@ impl IpfevDevice {
 /// because we are unsure how many events will be read from `IpfevDevice`, which means in the worst
 /// case scenario we have a large `Bytes` object that contains a single cfw event.
 pub fn start_ipfreader() -> (Receiver<Bytes>, thread::JoinHandle<()>) {
-    let capacity = 2 * 1024;
+    let capacity = 5 * 1024;
     let (tx, rx) = channel::bounded(capacity);
     (
         rx,
         thread::Builder::new()
-            .name("ipf_reader".to_string())
+            .name("ipf_reader".to_owned())
             .spawn(move || {
                 // We may need to adjust the size of this value. It's based off the original size
                 // of the ipfev in kernel ringbuffer.  The hope is that ipfev will provide an ioctl
@@ -200,7 +200,7 @@ pub fn start_eventprocessor(
     (
         loggers,
         thread::Builder::new()
-            .name("ipf_event_processor".to_string())
+            .name("ipf_event_processor".to_owned())
             .spawn(move || process_events(events, shutdown, vmobjs, loggers2))
             .expect("failed to start ipf event processing thread"),
     )

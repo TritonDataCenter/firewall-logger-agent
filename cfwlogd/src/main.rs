@@ -30,7 +30,7 @@ fn handle_signal(s: c_int, loggers: &Loggers) -> bool {
         libc::SIGHUP => {
             info!("rotating logs");
             let loggers = loggers.lock().unwrap();
-            for (_, logger) in loggers.iter() {
+            for logger in loggers.values() {
                 let _ = logger.rotate();
             }
         }

@@ -22,7 +22,7 @@ fn signal_handler(tx: Sender<c_int>) {
 
 pub fn start_signalhandler(tx: Sender<c_int>) -> thread::JoinHandle<()> {
     thread::Builder::new()
-        .name("signal_handler".to_string())
+        .name("signal_handler".to_owned())
         .spawn(move || signal_handler(tx))
         .expect("failed to spawn signal watcher thread")
 }
