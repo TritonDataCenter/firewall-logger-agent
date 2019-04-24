@@ -1,11 +1,11 @@
-use std::net::IpAddr;
+use std::net::Ipv6Addr;
 
 use chrono::{DateTime, TimeZone, Utc};
-use nom::{be_u128, be_u16, le_u16, le_u32, le_u64};
+use nom::{be_u128, be_u16, le_i64, le_u16, le_u32};
 use serde::Serialize;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CfwEvType {
     Block,
@@ -25,7 +25,7 @@ impl From<u16> for CfwEvType {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Direction {
     In,
@@ -43,7 +43,7 @@ impl From<u8> for Direction {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 pub enum Protocol {
     AH,
     ESP,
@@ -134,8 +134,8 @@ pub struct TrafficEvent {
     pub direction: Direction,
     pub source_port: u16,
     pub destination_port: u16,
-    pub source_ip: IpAddr,
-    pub destination_ip: IpAddr,
+    pub source_ip: Ipv6Addr,
+    pub destination_ip: Ipv6Addr,
     pub timestamp: DateTime<Utc>,
     #[serde(rename = "rule")]
     pub rule_uuid: Uuid,
@@ -154,11 +154,10 @@ named!(pub traffic_event( &[u8] ) -> CfwEvent,
         destination_port: be_u16 >>
         source_ip: be_u128 >>
         destination_ip: be_u128 >>
-        time_sec: le_u64 >>
-        time_usec: le_u64 >>
+        time_sec: le_i64 >>
+        time_usec: le_i64 >>
         rule_uuid: take!(16) >>
-        (
-            CfwEvent::Traffic(TrafficEvent{
+        (CfwEvent::Traffic(TrafficEvent{
                 event: CfwEvType::from(event),
                 length,
                 zonedid,
@@ -167,12 +166,95 @@ named!(pub traffic_event( &[u8] ) -> CfwEvent,
                 direction: Direction::from(direction[0]),
                 source_port,
                 destination_port,
-                source_ip: IpAddr::from(source_ip.to_be_bytes()),
-                destination_ip: IpAddr::from(destination_ip.to_be_bytes()),
-                timestamp: Utc.timestamp(time_sec as i64, time_usec as u32),
+                source_ip: Ipv6Addr::from(source_ip),
+                destination_ip: Ipv6Addr::from(destination_ip),
+                timestamp: Utc.timestamp(time_sec, (time_usec * 1000) as u32),
                 rule_uuid: Uuid::from_slice(rule_uuid)
                     .expect("we should have 16 bytes exactly"),
             })
         )
     )
 );
+
+#[cfg(test)]
+mod parser_tests {
+    use super::*;
+
+    // C representation of a cfw event
+    #[repr(C)]
+    pub struct cfwev_s {
+        pub event: u16,
+        pub length: u16,
+        pub zonedid: u32,
+        pub rule_id: u16,
+        pub protocol: u8,
+        pub direction: u8,
+        pub source_port: u16,
+        pub destination_port: u16,
+        pub source_ip: u128,
+        pub destination_ip: u128,
+        pub time_sec: i64,
+        pub time_usec: i64,
+        pub rule_uuid: [u8; 16],
+    }
+
+    /// Create a slice of bytes that represents what `/dev/ipfev` will return to us
+    unsafe fn cfwev_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
+        ::std::slice::from_raw_parts((p as *const T) as *const u8, ::std::mem::size_of::<T>())
+    }
+
+    #[test]
+    fn parse_event() {
+        let ip_s: u128 = "::ffff:172.24.4.150".parse::<Ipv6Addr>().unwrap().into();
+        let ip_d: u128 = "::ffff:172.24.4.151".parse::<Ipv6Addr>().unwrap().into();
+        let port_s: u16 = 2222;
+        let port_d: u16 = 22;
+        let now = chrono::offset::Utc::now();
+        // unix timeval only comtains microseconds
+        let ts = Utc.timestamp(now.timestamp(), now.timestamp_subsec_micros() * 1000);
+        let uuid = Uuid::parse_str("441862be-a3d4-4891-83c0-5022abec182f").unwrap();
+
+        let event = cfwev_s {
+            event: 1,
+            length: 80,
+            zonedid: 16,
+            rule_id: 6,
+            protocol: 6,
+            direction: 1,
+            source_port: port_s.to_be(),
+            destination_port: port_d.to_be(),
+            source_ip: ip_s.to_be(),
+            destination_ip: ip_d.to_be(),
+            time_sec: ts.timestamp(),
+            time_usec: ts.timestamp_subsec_micros() as i64,
+            rule_uuid: uuid.as_bytes().clone(),
+        };
+
+        let bytes = unsafe { cfwev_as_u8_slice(&event) };
+        let cfw_event = traffic_event(bytes);
+
+        // parsed successfully
+        assert!(cfw_event.is_ok());
+        let cfw_event = cfw_event.unwrap();
+
+        // no leftover bytes after parsing
+        let leftover: Vec<u8> = vec![];
+        assert_eq!(cfw_event.0, leftover.as_slice());
+        match cfw_event.1 {
+            CfwEvent::Traffic(e) => {
+                assert_eq!(e.event, CfwEvType::from(event.event));
+                assert_eq!(e.length, event.length);
+                assert_eq!(e.zonedid, event.zonedid);
+                assert_eq!(e.rule_id, event.rule_id);
+                assert_eq!(e.protocol, Protocol::from(event.protocol));
+                assert_eq!(e.direction, Direction::from(event.direction));
+                assert_eq!(e.source_port, port_s);
+                assert_eq!(e.destination_port, port_d);
+                assert_eq!(e.source_ip, Ipv6Addr::from(ip_s));
+                assert_eq!(e.destination_ip, Ipv6Addr::from(ip_d));
+                assert_eq!(e.timestamp, ts);
+                assert_eq!(e.rule_uuid, uuid);
+            }
+        }
+    }
+}
