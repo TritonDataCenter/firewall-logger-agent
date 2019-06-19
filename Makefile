@@ -70,7 +70,7 @@ release: all cargo
 	    $(TOP)/npm \
 	    $(TOP)/package.json \
 	    $(TOP)/smf \
-	    $(TOP)/tools \
+	    $(TOP)/deps/eng/tools \
 	    $(RELSTAGEDIR)/$(NAME)
 	uuid -v4 >$(RELSTAGEDIR)/$(NAME)/image_uuid
 	cd $(RELSTAGEDIR) && $(TAR) -I pigz -cf $(TOP)/$(RELEASE_TARBALL) *
