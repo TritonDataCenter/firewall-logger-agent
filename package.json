@@ -1,0 +1,16 @@
+{
+  "name": "firewall-logger-agent",
+  "description": "Triton Firewall Logger Agent",
+  "version": "1.0.0",
+  "author": "Joyent (joyent.com)",
+  "private": true,
+  "dependencies": {
+  },
+  "devDependencies": {
+  },
+  "scripts": {
+    "postinstall": "./npm/postinstall.sh",
+    "postuninstall": "./npm/postuninstall.sh"
+  },
+  "license": "MPL-2.0"
+}
