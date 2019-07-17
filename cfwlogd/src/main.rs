@@ -145,7 +145,6 @@ fn cfwlogd_daemonize() {
         .stdout(stdout)
         .stderr(stderr)
         .group("daemon")
-        .working_directory(LOG_DIR)
         .umask(0o022)
         .start()
     {
@@ -212,6 +211,7 @@ fn cfwlogd_handle_signals(s: c_int, loggers: &Loggers) -> bool {
 fn cfwlogd_chroot<P: Into<PathBuf>>(p: P) -> io::Result<()> {
     let path = p.into();
     std::fs::create_dir_all(&path)?;
+    std::env::set_current_dir(&path)?;
     let cstring = CString::new(path.into_os_string().into_vec())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "path contained nuls"))?;
     unsafe {
