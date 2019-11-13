@@ -11,10 +11,10 @@ use futures::stream::Fuse;
 use futures::{try_ready, Async, Poll, Stream};
 
 /// The following code is a modified version of:
-/// https://play.rust-lang.org/?gist=971e438cabd6f91efb76b7e45b15edf3&version=stable
+/// <https://play.rust-lang.org/?gist=971e438cabd6f91efb76b7e45b15edf3&version=stable>
 ///
 /// The original author of that snippet is:
-/// https://github.com/hyperium/hyper/issues/1335#issuecomment-331682968
+/// <https://github.com/hyperium/hyper/issues/1335#issuecomment-331682968>
 
 #[derive(Debug)]
 pub struct Lines<S: Stream> {
