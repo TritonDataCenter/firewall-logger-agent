@@ -20,11 +20,11 @@ pipeline {
         // TODO: Switch to convention based make target
         stage('test') {
             steps {
-                sh('cargo test --lib')
+                sh('cargo test')
             }
         }
         stage('build agent and upload') {
-            steps { 
+            steps {
                 sh('''
 set -o errexit
 set -o pipefail
