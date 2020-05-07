@@ -5,7 +5,7 @@
 #
 
 #
-# Copyright 2019 Joyent, Inc.
+# Copyright 2020 Joyent, Inc.
 #
 
 RUST_CODE = 1
@@ -20,8 +20,8 @@ JSON_FILES :=		package.json
 # While this component doesn't require a base image, we set this so
 # that validate-buildenv can determine whether we're building on
 # a recent enough image (including a reasonably recent version of rust)
-# triton-origin-x86_64-19.1.0
-BASE_IMAGE_UUID = cbf116a0-43a5-447c-ad8c-8fa57787351c
+# triton-origin-x86_64-19.4.0
+BASE_IMAGE_UUID = 59ba2e5e-976f-4e09-8aac-a4a7ef0395f5
 
 #
 # Makefile.defs defines variables used as part of the build process.

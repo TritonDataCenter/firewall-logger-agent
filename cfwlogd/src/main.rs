@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-// Copyright 2019 Joyent, Inc.
+// Copyright 2020 Joyent, Inc.
 
 //! cfwlogd is a userland daemon that is responsible for translating firewall events into newline
 //! separated json logs.  It does so by attaching to the kernel device found at `/dev/ipfev` and
@@ -242,7 +242,7 @@ fn validate_log_files(vmobjs: &Vmobjs) {
                 Ok(info) => {
                     // If we find the "\n" we add 1 to the index so that when we truncate the file
                     // we keep the newline.
-                    let idx = info.index.and_then(|i| Some(i + 1)).unwrap_or(0);
+                    let idx = info.index.map(|i| i + 1).unwrap_or(0);
                     // If idx matches the length of the file we can skip the
                     // truncation.
                     if idx == info.length {
