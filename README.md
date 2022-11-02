@@ -9,9 +9,9 @@
 -->
 
 This repository is part of the Joyent Triton project. See the [contribution
-guidelines](https://github.com/joyent/triton/blob/master/CONTRIBUTING.md)
+guidelines](https://github.com/TritonDataCenter/triton/blob/master/CONTRIBUTING.md)
 and general documentation at the main
-[Triton project](https://github.com/joyent/triton) page.
+[Triton project](https://github.com/TritonDataCenter/triton) page.
 
 # Triton Firewall Logger Agent
 
@@ -23,7 +23,7 @@ buffer into cloud firewall (cfw) logs that will be serialized out to disk. It
 is then the job of hermes to upload these logs into the customer's manta
 storage.
 
-For more information see [rfd-163](https://github.com/joyent/rfd/tree/master/rfd/0163)
+For more information see [rfd-163](https://github.com/TritonDataCenter/rfd/tree/master/rfd/0163)
 
 ## Development
 
