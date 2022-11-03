@@ -6,6 +6,7 @@
 
 #
 # Copyright 2020 Joyent, Inc.
+# Copyright 2022 MNX Cloud, Inc.
 #
 
 RUST_CODE = 1
@@ -62,10 +63,11 @@ release: all cargo
 	cp -r \
 	    $(TOP)/bin \
 	    $(TOP)/npm \
-	    $(TOP)/package.json \
 	    $(TOP)/smf \
 	    $(TOP)/deps/eng/tools \
 	    $(RELSTAGEDIR)/$(NAME)
+	json -f $(TOP)/package.json -e 'this.version += "-$(STAMP)"' \
+	    > $(RELSTAGEDIR)/$(NAME)/package.json
 	uuid -v4 >$(RELSTAGEDIR)/$(NAME)/image_uuid
 	cd $(RELSTAGEDIR) && $(TAR) -I pigz -cf $(TOP)/$(RELEASE_TARBALL) *
 	cat $(TOP)/manifest.tmpl | sed \
