@@ -27,10 +27,9 @@ pipeline {
                 sh('make check')
             }
         }
-        // TODO: Switch to convention based make target
         stage('test') {
             steps {
-                sh('cargo test')
+                sh('make test')
             }
         }
         stage('build agent and upload') {

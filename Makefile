@@ -57,6 +57,13 @@ $(CARGO_TARGET_DIR)/debug/cfwlogd: $(RS_FILES) | $(CARGO_EXEC)
 $(CARGO_TARGET_DIR)/release/cfwlogd: $(RS_FILES) | $(CARGO_EXEC)
 	$(CARGO) build --release
 
+.PHONY: test
+test: test-unit
+
+.PHONY: test-unit
+test-unit:
+	$(CARGO) test
+
 .PHONY: release
 release: all
 	echo "Building $(RELEASE_TARBALL)"
