@@ -23,5 +23,4 @@ man
 smf/manifests/bapi.xml
 *.vim
 *.swp
-
-
+/rust

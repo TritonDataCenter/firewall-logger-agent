@@ -6,10 +6,13 @@
 
 #
 # Copyright 2020 Joyent, Inc.
-# Copyright 2022 MNX Cloud, Inc.
+# Copyright 2023 MNX Cloud, Inc.
 #
 
-RUST_CODE = 1
+RUST_TOOLCHAIN = 1.40.0
+
+# Rust < 1.49 must specify sun-solaris target:
+RUST_BOOTSTRAP_TARGET=x86_64-sun-solaris
 
 #
 # Files
@@ -30,6 +33,8 @@ BASE_IMAGE_UUID = 59ba2e5e-976f-4e09-8aac-a4a7ef0395f5
 #
 ENGBLD_REQUIRE := $(shell git submodule update --init deps/eng)
 include ./deps/eng/tools/mk/Makefile.defs
+include ./deps/eng/tools/mk/Makefile.rust.defs
+
 TOP ?= $(error Unable to access eng.git submodule Makefiles.)
 
 NAME :=			firewall-logger-agent
@@ -43,18 +48,17 @@ DISTCLEAN_FILES += $(NAME)-*.manifest $(NAME)-*.tgz
 # Repo-specific targets
 #
 .PHONY: all
-all: $(SMF_MANIFESTS) | $(REPO_DEPS)
+all: $(SMF_MANIFESTS) $(CARGO_TARGET_DIR)/release/cfwlogd | $(REPO_DEPS)
 
-.PHONY: cargo
-cargo:
-	cargo build --release
+debug: $(CARGO_TARGET_DIR)/debug/cfwlogd
+$(CARGO_TARGET_DIR)/debug/cfwlogd: $(RS_FILES) | $(CARGO_EXEC)
+	$(CARGO) build
 
-# Clean the target directory:
-TARGET_DIR ?= target
-DISTCLEAN_FILES += $(TARGET_DIR)
+$(CARGO_TARGET_DIR)/release/cfwlogd: $(RS_FILES) | $(CARGO_EXEC)
+	$(CARGO) build --release
 
 .PHONY: release
-release: all cargo
+release: all
 	echo "Building $(RELEASE_TARBALL)"
 	mkdir -p $(TOP)/bin
 	cp $(TOP)/target/release/cfwlogd \
@@ -102,3 +106,4 @@ cutarelease:
 
 include ./deps/eng/tools/mk/Makefile.deps
 include ./deps/eng/tools/mk/Makefile.targ
+include ./deps/eng/tools/mk/Makefile.rust.targ

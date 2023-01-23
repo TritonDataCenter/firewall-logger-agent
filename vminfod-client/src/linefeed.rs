@@ -3,6 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 // Copyright 2019 Joyent, Inc.
+// Copyright 2023 MNX Cloud, Inc.
 
 use std::mem::replace;
 use std::string::FromUtf8Error;
@@ -127,5 +128,4 @@ mod linefeed_tests {
         assert_eq!(lines.poll().unwrap(), Async::Ready(Some("".to_string())));
         assert_eq!(lines.poll().unwrap(), Async::Ready(None));
     }
-
 }
