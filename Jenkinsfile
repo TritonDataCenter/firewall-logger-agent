@@ -6,6 +6,7 @@
 
 /*
  * Copyright 2021 Joyent, Inc.
+ * Copyright 2023 MNX Cloud, Inc.
  */
 
 @Library('jenkins-joylib@v1.0.8') _
@@ -27,10 +28,9 @@ pipeline {
                 sh('make check')
             }
         }
-        // TODO: Switch to convention based make target
         stage('test') {
             steps {
-                sh('cargo test')
+                sh('make test')
             }
         }
         stage('build agent and upload') {
