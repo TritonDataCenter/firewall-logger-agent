@@ -67,7 +67,7 @@ fn clamp_ring_size(min: usize, max: usize, value: usize) -> usize {
 /// The consumed events will be sent to the returned `Receiver`.
 pub fn start_event_reader<T: EventSource + 'static>(
     mut device: T,
-) -> (Receiver<CfwEvent>, thread::JoinHandle<()>) {
+) -> (Receiver<Box<CfwEvent>>, thread::JoinHandle<()>) {
     let (max, ringsize) = device.event_sizing().unwrap_or_else(|e| {
         error!("failed to get ring size from device: {}", e);
         std::process::exit(e.raw_os_error().unwrap_or(-1));
@@ -127,7 +127,7 @@ pub fn start_event_reader<T: EventSource + 'static>(
 
 /// Takes a buffer of bytes and slices them up into `CfwEvent`s that are then sent to the provided
 /// `Sender`.
-fn parse_events(bytes: &[u8], sender: &Sender<CfwEvent>) -> bool {
+fn parse_events(bytes: &[u8], sender: &Sender<Box<CfwEvent>>) -> bool {
     let mut bytes = bytes;
     loop {
         // Leaving this as an expect call because if we ever get out of sync or the device returns
@@ -161,7 +161,7 @@ fn parse_events(bytes: &[u8], sender: &Sender<CfwEvent>) -> bool {
 
 /// Starts a thread that will receive `CfwEvent`s and fan them out to per zone logging threads.
 pub fn start_event_fanout(
-    events: Receiver<CfwEvent>,
+    events: Receiver<Box<CfwEvent>>,
     shutdown: Receiver<()>,
     vmobjs: Vmobjs,
 ) -> (Loggers, thread::JoinHandle<()>) {
@@ -179,7 +179,7 @@ pub fn start_event_fanout(
 /// Fanout events coming from the Receiver into the appropriate Logger, creating a new Logger if
 /// one does not yet exist.
 fn fanout_events(
-    events: Receiver<CfwEvent>,
+    events: Receiver<Box<CfwEvent>>,
     shutdown: Receiver<()>,
     vmobjs: Vmobjs,
     mut loggers: Loggers,
@@ -230,10 +230,11 @@ fn fanout_events(
 
 /// For a given cfw event, find or create a `Logger` thats responsible for serializing the event to
 /// disk.
-fn queue_zone_events(events: Vec<CfwEvent>, vmobjs: &Vmobjs, loggers: &mut Loggers) {
+#[allow(clippy::vec_box)] // The bounded channel operates on Box<CfwEvent> already.
+fn queue_zone_events(events: Vec<Box<CfwEvent>>, vmobjs: &Vmobjs, loggers: &mut Loggers) {
     let mut loggers = loggers.lock().unwrap();
     for event in events {
-        if let CfwEvent::Unknown(_) = event {
+        if let CfwEvent::Unknown(_) = *event {
             continue;
         };
         let zonedid = event.zone();
@@ -254,15 +255,23 @@ fn queue_zone_events(events: Vec<CfwEvent>, vmobjs: &Vmobjs, loggers: &mut Logge
                 }
             },
         };
-        if logger.send(event).is_err() {
-            // Receive side of the log was disconnected somehow, so we drop the entry allowing it
-            // to be recreated on the next event.
-            // CMON TRITON-1755
-            error!(
-                "failed to log event for zone {} (logger channel disconnected)",
-                zonedid
-            );
-            loggers.remove(&zonedid);
+        if let Err(e) = logger.try_send(event) {
+            match e {
+                TrySendError::Disconnected(_) => {
+                    warn!(
+                        "failed to log event for zone {} (logger channel disconnected)",
+                        zonedid
+                    );
+                    loggers.remove(&zonedid);
+                }
+                TrySendError::Full(_) => {
+                    // CMON TRITON-1755
+                    warn!(
+                        "failed to log event for zone {} (logger channel is full)",
+                        zonedid
+                    );
+                }
+            }
         }
     }
 }

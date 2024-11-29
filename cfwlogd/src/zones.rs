@@ -23,7 +23,6 @@ fn insert_vmobj(zone: Zone, vmobjs: &Vmobjs) {
 /// Search through a vminfod changes payload and see if the alias was a part of the update
 fn alias_changed(changes: &[Changes]) -> bool {
     changes.iter().any(|change| {
-        dbg!(change.path.first().map(|v| v.as_ref()));
         change
             .path
             .first()

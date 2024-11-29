@@ -12,8 +12,9 @@
 
 use crate::parser::CfwEvent;
 use crate::zones::{Vmobjs, Zonedid};
-use crossbeam::channel::{self, Select, SendError};
+use crossbeam::channel::{self, Select, SendError, TrySendError};
 use serde::Serialize;
+use std::boxed::Box;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
@@ -34,7 +35,7 @@ const BUF_SIZE: usize = 1024 * 1024;
 #[derive(Debug, Serialize)]
 struct LogEvent<'a> {
     #[serde(flatten)]
-    event: CfwEvent,
+    event: &'a CfwEvent,
     vm: &'a str,
     alias: &'a str,
 }
@@ -58,15 +59,15 @@ pub struct Logger {
     /// Threads handle
     handle: thread::JoinHandle<()>,
     /// Send half of a channel that's used to get CfwEvents into the Logger
-    sender: channel::Sender<CfwEvent>,
+    sender: channel::Sender<Box<CfwEvent>>,
     /// Send half of a channel that's used to signal the Logger to perform specific actions
     signal: channel::Sender<LoggerSignal>,
 }
 
 impl Logger {
     /// Send an event to the logger to be logged out to disk
-    pub fn send(&self, e: CfwEvent) -> Result<(), SendError<CfwEvent>> {
-        self.sender.send(e)
+    pub fn try_send(&self, e: Box<CfwEvent>) -> Result<(), TrySendError<Box<CfwEvent>>> {
+        self.sender.try_send(e)
     }
 
     /// Flushes the logger's internal `BufWriter` to disk
@@ -98,7 +99,8 @@ fn open_file(vm: &str, customer: &str) -> std::io::Result<File> {
 }
 
 /// Given a collection of `CfwEvent`, serialize them out to disk as JSON formatted logs.
-fn log_events<W: Write>(events: Vec<CfwEvent>, mut writer: W, vmobjs: &Vmobjs) {
+#[allow(clippy::vec_box)] // The bounded channel operates on Box<CfwEvent> already.
+fn log_events<W: Write>(events: Vec<Box<CfwEvent>>, mut writer: W, vmobjs: &Vmobjs) {
     // force the event type for now
     let vmobjs = vmobjs.read().unwrap();
     for event in events {
@@ -109,7 +111,7 @@ fn log_events<W: Write>(events: Vec<CfwEvent>, mut writer: W, vmobjs: &Vmobjs) {
         // Note instead of String::as_ref we could also use "|s| &**s"
         let alias = vmobj.alias.as_ref().map_or("", String::as_ref);
         let event = LogEvent {
-            event,
+            event: &event,
             vm: &vmobj.uuid,
             alias: &alias,
         };
@@ -163,7 +165,7 @@ fn _start_logger(
     vm: String,
     customer: String,
     vmobjs: Vmobjs,
-    events: channel::Receiver<CfwEvent>,
+    events: channel::Receiver<Box<CfwEvent>>,
     signal: channel::Receiver<LoggerSignal>,
 ) -> thread::JoinHandle<()> {
     thread::Builder::new()
@@ -220,8 +222,13 @@ fn _start_logger(
 
 /// Return a Logger if we have information for the zone already otherwise return None
 pub fn start_logger(zonedid: Zonedid, vmobjs: Vmobjs) -> Option<Logger> {
-    // TODO TRITON-1787
-    let (event_tx, event_rx) = channel::unbounded();
+    // We bound the loggers incoming queue so that we don't endlessly consume memory, since the
+    // event reading thread is able to geenrate events faster than we can serialize to JSON and
+    // write to disk.  This means each thread can consume somewhere around:
+    // (channel-capacity * sizeof (CfwEvent)) + (channel-capacity * sizeof (CfwEvent *))
+    // In addition to other things such as the BufWriter buffer size and umem PTC which is enabled
+    // in the SMF manifest.
+    let (event_tx, event_rx) = channel::bounded(500_000);
     let (signal_tx, signal_rx) = channel::bounded(1);
     let vms = vmobjs.read().unwrap();
     if let Some(vm) = vms.get(&zonedid) {

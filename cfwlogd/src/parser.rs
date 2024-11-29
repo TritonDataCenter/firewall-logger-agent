@@ -12,6 +12,7 @@ use nom::error::VerboseError;
 use nom::number::complete::{be_u128, be_u16, le_i64, le_u16, le_u32, le_u8};
 use nom::IResult;
 use serde::Serialize;
+use std::boxed::Box;
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -141,17 +142,17 @@ fn cfwevent_parse_header<'a>(
 fn cfwevent_parse_unknown<'a>(
     header: CfwEventHeader,
     bytes: &'a [u8],
-) -> IResult<&'a [u8], CfwEvent, VerboseError<&'a [u8]>> {
+) -> IResult<&'a [u8], Box<CfwEvent>, VerboseError<&'a [u8]>> {
     // Take everything after the first 8 bytes (event + length + zonedid).
     let (bytes, _skip) = take(header.1 - 8)(bytes)?;
     Ok((
         bytes,
-        CfwEvent::Unknown(UnknownEvent {
+        Box::new(CfwEvent::Unknown(UnknownEvent {
             event: CfwEvType::Unknown,
             raw_event: header.0,
             length: header.1,
             zonedid: header.2,
-        }),
+        })),
     ))
 }
 
@@ -160,7 +161,7 @@ fn cfwevent_parse_traffic<'a>(
     evtype: CfwEvType,
     header: CfwEventHeader,
     bytes: &'a [u8],
-) -> IResult<&'a [u8], CfwEvent, VerboseError<&'a [u8]>> {
+) -> IResult<&'a [u8], Box<CfwEvent>, VerboseError<&'a [u8]>> {
     let (bytes, rule_id) = le_u32(bytes)?;
     let (bytes, source_port) = be_u16(bytes)?;
     let (bytes, destination_port) = be_u16(bytes)?;
@@ -174,7 +175,7 @@ fn cfwevent_parse_traffic<'a>(
     let (bytes, rule_uuid) = take(16usize)(bytes)?;
     Ok((
         bytes,
-        CfwEvent::Traffic(TrafficEvent {
+        Box::new(CfwEvent::Traffic(TrafficEvent {
             event: evtype,
             length: header.1,
             zonedid: header.2,
@@ -187,13 +188,15 @@ fn cfwevent_parse_traffic<'a>(
             destination_ip: Ipv6Addr::from(destination_ip),
             timestamp: Utc.timestamp(time_sec, (time_usec * 1000) as u32),
             rule_uuid: Uuid::from_slice(rule_uuid).expect("we should have 16 bytes exactly"),
-        }),
+        })),
     ))
 }
 
 /// Parse a single CfwEvent out of the provided bytes returning a slice that points at the next
 /// event.
-pub fn cfwevent_parse<'a>(bytes: &'a [u8]) -> IResult<&'a [u8], CfwEvent, VerboseError<&'a [u8]>> {
+pub fn cfwevent_parse<'a>(
+    bytes: &'a [u8],
+) -> IResult<&'a [u8], Box<CfwEvent>, VerboseError<&'a [u8]>> {
     let (bytes, header) = cfwevent_parse_header(bytes)?;
     let event_type = CfwEvType::from(header.0);
     match event_type {
@@ -209,7 +212,6 @@ mod tests {
     #[test]
     fn parse_traffic_event() {
         let mut event = testutils::generate_event();
-        std::dbg!(&event);
         let now = chrono::offset::Utc::now();
         let ts = Utc.timestamp(now.timestamp(), now.timestamp_subsec_micros() * 1000);
         let uuid = Uuid::parse_str("a7963143-14da-48d6-bef0-422f305d1556").unwrap();
@@ -227,7 +229,7 @@ mod tests {
         let cfw_event = cfw_event.unwrap();
 
         assert!(cfw_event.0.is_empty(), "no bytes left over");
-        match cfw_event.1 {
+        match *cfw_event.1 {
             CfwEvent::Traffic(e) => {
                 assert_eq!(e.event, CfwEvType::from(event.event));
                 assert_eq!(e.length, event.length);
@@ -260,7 +262,7 @@ mod tests {
         let cfw_event = cfw_event.unwrap();
 
         assert!(cfw_event.0.is_empty(), "no bytes left over");
-        match cfw_event.1 {
+        match *cfw_event.1 {
             CfwEvent::Unknown(e) => {
                 assert_eq!(e.event, CfwEvType::from(event.event));
                 assert_eq!(e.length, event.length);
@@ -291,7 +293,7 @@ mod tests {
         let mut bytes: &[u8] = &mixed;
         loop {
             let (leftover, event) = cfwevent_parse(bytes).expect("failed to parse CfwEvents");
-            match event {
+            match *event {
                 CfwEvent::Traffic(_) => traffic_count += 1,
                 CfwEvent::Unknown(_) => unknown_count += 1,
             };
